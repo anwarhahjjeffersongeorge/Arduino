@@ -1,9 +1,9 @@
-/* 
+/*
   i2s.h - Software I2S library for esp8266
 
   Copyright (c) 2015 Hristo Gochkov. All rights reserved.
   This file is part of the esp8266 core for Arduino environment.
- 
+
   This library is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
   License as published by the Free Software Foundation; either
@@ -40,7 +40,7 @@ speed.
 extern "C" {
 #endif
 
-void i2s_begin();
+void i2s_begin(bool in,k bool out);
 void i2s_end();
 void i2s_set_rate(uint32_t rate);//Sample Rate in Hz (ex 44100, 48000)
 bool i2s_write_sample(uint32_t sample);//32bit sample with channels being upper and lower 16 bits (blocking when DMA is full)
