@@ -201,23 +201,52 @@ bool ICACHE_FLASH_ATTR i2s_write_lr(int16_t left, int16_t right){
 
 static uint32_t _i2s_sample_rate;
 
-void ICACHE_FLASH_ATTR i2s_set_rate(uint32_t rate){ //Rate in HZ
+void ICACHE_FLASH_ATTR i2s_set_rate(uint32_t rate, bool txSlave, bool rxSlave){ //Rate in HZ
   if(rate == _i2s_sample_rate) return;
   _i2s_sample_rate = rate;
   uint32_t i2s_clock_div = (I2SBASEFREQ/(_i2s_sample_rate*32)) & I2SCDM;
   uint8_t i2s_bck_div = (I2SBASEFREQ/(_i2s_sample_rate*i2s_clock_div*2)) & I2SBDM;
   //os_printf("Rate %u Div %u Bck %u Frq %u\n", _i2s_sample_rate, i2s_clock_div, i2s_bck_div, I2SBASEFREQ/(i2s_clock_div*i2s_bck_div*2));
 
-  //!trans master, !bits mod, rece slave mod, rece msb shift, right first, msb right
-  I2SC &= ~(I2STSM | (I2SBMM << I2SBM) | (I2SBDM << I2SBD) | (I2SCDM << I2SCD));
-  I2SC |= I2SRF | I2SMR | I2SRSM | I2SRMS | ((i2s_bck_div-1) << I2SBD) | ((i2s_clock_div-1) << I2SCD);
+  //I2SCONF: clear I2S_BCK_DIV_NUM, clear I2S_CLKM_DIV_NUM, !I2S_BITS_MOD;
+  I2SC &= ~((I2SBDM << I2SBD) | (I2SCDM << I2SCD) | (I2SBMM << I2SBM));
+
+  i2sRxSlave = rxSlave;
+  i2sTxSlave = txSlave;
+  uint8_t sm;
+
+  //tx
+  if(i2sOut == true){
+    //I2SCONF: clear I2S_TRANS_SLAVE_MOD
+    I2SC &= ~(I2STSM);
+    //I2SCONF: set I2S_TRANS_SLAVE_MOD ???
+    sm = (i2sTxSlave) ? I2STSM : 0;
+    I2SC |= sm;
+  }
+
+
+  //rx
+  if(i2sIn == true){
+    //I2SCONF: clear I2S_RECE_SLAVE_MOD,
+    I2SC &= ~(I2SRSM);
+    //I2SCONF: set I2S_RECE_SLAVE_MODE ????
+    sm =  (rxSlave) ? I2SRSM : 0;
+    I2SC |= sm;
+  }
+
+
+  //I2SCONF: I2S_RIGHT_FIRST, I2S_MSB_RIGHT, I2S_RECE_MSB_SHIFT, I2S_TRANS_MSB_SHIFT
+  I2SC |=  I2SRF | I2SMR | I2SRMS | I2STMS;
+  //Use I2S clock divider to produce appropriate sample rate
+  I2SC |= ((i2s_bck_div-1) << I2SBD) | ((i2s_clock_div-1) << I2SCD);
+
+  // //!trans master, !bits mod, rece slave mod, rece msb shift, right first, msb right
+  // I2SC &= ~(I2STSM | (I2SBMM << I2SBM) | (I2SBDM << I2SBD) | (I2SCDM << I2SCD));
+  // I2SC |= I2SRF | I2SMR | I2SRSM | I2SRMS | ((i2s_bck_div-1) << I2SBD) | ((i2s_clock_div-1) << I2SCD);
 }
 
-//to let us know whether we are doing I2S in or I2s out
-bool i2sIn = true;
-bool i2sOut = true;
 
-void ICACHE_FLASH_ATTR i2s_begin(bool in, bool out){
+void ICACHE_FLASH_ATTR i2s_begin(uint32_t rate, bool in, bool out, bool txSlave, bool rxSlave, /*bool rxOutClock,*/ uint8_t txFifoMode, uint8_t rxFifoMode, uint8_t txChanMode, uint8_t rxChanMode){
   _i2s_sample_rate = 0;
   i2s_slc_begin();
 
@@ -247,11 +276,27 @@ void ICACHE_FLASH_ATTR i2s_begin(bool in, bool out){
   I2SC |= I2SRST;
   I2SC &= ~(I2SRST);
 
+  //decide what tx and rx fifo modes to set or defaults
+  i2sOutFifoMode = (txFifoMode > 5) ? I2STXFIFO_16FULL : txFifoMode; //(6-7) are invalid
+  i2sInFifoMode = (rxFifoMode > 3) ? I2SRXFIFO_16FULL : rxFifoMode; //(4-7) are invalid
+  i2sOutChanMode = (txChanMode > 4) ? I2STXCHAN_DUAL : txChanMode;
+  i2sInChanMode = (rxChanMode > 2) ? I2SRXCHAN_DUAL : rxChanMode;
+
   I2SFC &= ~(I2SDE | (I2STXFMM << I2STXFM) | (I2SRXFMM << I2SRXFM)); //Set RX/TX FIFO_MOD=0 and disable DMA (FIFO only)
+  I2SFC |= (i2sOutFifoMode << I2STXFM) | (i2sInFifoMode << I2SRXFM); //set RX/TX FIFO_MOD to user value
   I2SFC |= I2SDE; //Enable DMA
   I2SCC &= ~((I2STXCMM << I2STXCM) | (I2SRXCMM << I2SRXCM)); //Set RX/TX CHAN_MOD=0
-  i2s_set_rate(44100);
-  I2SC |= I2STXS; //Start transmission
+  I2SCC |= (i2sOutChanMode << I2STXCM) | (i2sInChanMode << I2SRXCM);
+  i2s_set_rate(rate, txSlave, rxSlave);
+
+  // i2sRXOutputClock = rxOutClock;
+
+  if(i2sOut == true /*&& i2sTxSlave == false*/){
+    I2SC |= I2STXS; //Start TX transmission
+  }
+  if(i2sIn == true){
+    I2SC |= I2SRXS; //Start RX transmission
+  }
 }
 
 void ICACHE_FLASH_ATTR i2s_end(){
