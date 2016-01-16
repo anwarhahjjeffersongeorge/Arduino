@@ -32,6 +32,7 @@ extern void ets_wdt_disable(void);
 
 #define SLC_BUF_CNT (8) //Number of buffers in the I2S circular buffer
 #define SLC_BUF_LEN (64) //Length of one buffer, in 32-bit words.
+#define RX_NUM (128) //unit word
 
 //We use a queue to keep track of the DMA buffers that are empty. The ISR will push buffers to the back of the queue,
 //the mp3 decode will pull them from the front and fill them. For ease, the queue will contain *pointers* to the DMA
@@ -267,6 +268,7 @@ void ICACHE_FLASH_ATTR i2s_begin(uint32_t rate, bool in, bool out, bool txSlave,
     pinMode(13, FUNCTION_1); //I2SI_BCK (SCLK)
   }
 
+  //enable 160MHz Clock to I2S subsystem?
   I2S_CLK_ENABLE();
   I2SIC = 0x3F;
   I2SIE = 0;
@@ -282,11 +284,18 @@ void ICACHE_FLASH_ATTR i2s_begin(uint32_t rate, bool in, bool out, bool txSlave,
   i2sOutChanMode = (txChanMode > 4) ? I2STXCHAN_DUAL : txChanMode;
   i2sInChanMode = (rxChanMode > 2) ? I2SRXCHAN_DUAL : rxChanMode;
 
+  //fifo, chan modes
+
   I2SFC &= ~(I2SDE | (I2STXFMM << I2STXFM) | (I2SRXFMM << I2SRXFM)); //Set RX/TX FIFO_MOD=0 and disable DMA (FIFO only)
   I2SFC |= (i2sOutFifoMode << I2STXFM) | (i2sInFifoMode << I2SRXFM); //set RX/TX FIFO_MOD to user value
   I2SFC |= I2SDE; //Enable DMA
   I2SCC &= ~((I2STXCMM << I2STXCM) | (I2SRXCMM << I2SRXCM)); //Set RX/TX CHAN_MOD=0
   I2SCC |= (i2sOutChanMode << I2STXCM) | (i2sInChanMode << I2SRXCM);
+
+  //set RX eof num
+  I2SRXEN &= 0;
+  I2SRXEN != RX_NUM;
+
   i2s_set_rate(rate, txSlave, rxSlave);
 
   // i2sRXOutputClock = rxOutClock;
